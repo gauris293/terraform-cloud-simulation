@@ -1,0 +1,59 @@
+name: 'Terraform LocalStack Simulation'
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  simulate-infrastructure:
+    name: 'Test Terraform against LocalStack'
+    runs-on: ubuntu-latest
+
+    # Spin up LocalStack as a background Docker container
+    services:
+      localstack:
+        image: localstack/localstack:latest
+        ports:
+          - 4566:4566
+        env:
+          SERVICES: s3  # Add comma-separated services you need (e.g., s3,ec2,dynamodb)
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+          terraform_wrapper: false  # Required so tflocal captures clean exit codes
+
+      - name: Setup Python & Install tflocal
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install terraform-local
+        run: pip install terraform-local
+
+      - name: Wait for LocalStack Readiness
+        run: |
+          timeout 60 bash -c 'until curl -s http://localhost:4566/_localstack/health | grep -E "\"s3\": \"(running|available)\""; do sleep 2; done'
+
+      - name: Terraform Init (Simulated)
+        run: tflocal init
+
+      - name: Terraform Plan (Simulated)
+        run: tflocal plan
+
+      - name: Terraform Apply (Simulated)
+        run: tflocal apply -auto-approve
+
+      - name: Verify Simulated Resource
+        run: |
+          BUCKET=$(tflocal output -raw bucket_id)
+          echo "Successfully provisioned simulated bucket: $BUCKET"
+
+      - name: Terraform Destroy (Simulated)
+        run: tflocal destroy -auto-approve
